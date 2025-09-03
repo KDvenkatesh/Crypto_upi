@@ -1,70 +1,99 @@
-module message_board_addr::message_board {
+
+module message_board_addr::crypto_upi {
     use std::string::String;
+    use std::signer;
+    use std::vector;
+    use aptos_framework::coin::{Self, Coin};
+    use aptos_framework::account;
 
-    use aptos_framework::object::{Self, ExtendRef};
-
-    struct Message has key {
-        string_content: String,
+    /// Supported stablecoins (demo: USDT, USDC)
+    struct SupportedCoin has copy, drop, store, key {
+        symbol: String,
+        coin_type: u8, // 0 = USDT, 1 = USDC
     }
 
-    const BOARD_OBJECT_SEED: vector<u8> = b"message_board";
-
-    struct BoardObjectController has key {
-        extend_ref: ExtendRef,
+    /// Merchant info
+    struct Merchant has key {
+        owner: address,
+        qr_code: String,
+        cashback_percent: u8, // e.g. 5 = 5%
     }
 
-    // This function is only called once when the module is published for the first time.
-    // init_module is optional, you can also have an entry function as the initializer.
-    fun init_module(sender: &signer) {
-        let constructor_ref = &object::create_named_object(sender, BOARD_OBJECT_SEED);
-        move_to(&object::generate_signer(constructor_ref), BoardObjectController {
-            extend_ref: object::generate_extend_ref(constructor_ref),
+    /// Payment record
+    struct Payment has key {
+        payer: address,
+        merchant: address,
+        amount: u64,
+        coin_type: u8,
+        split_with: vector<address>,
+        cashback: u64,
+        timestamp: u64,
+    }
+
+    /// Register merchant with QR code and cashback
+    public entry fun register_merchant(
+        sender: &signer,
+        qr_code: String,
+        cashback_percent: u8
+    ) {
+        let addr = signer::address_of(sender);
+        assert!(!exists<Merchant>(addr), 1);
+        move_to(sender, Merchant {
+            owner: addr,
+            qr_code,
+            cashback_percent,
         });
     }
 
-    // ======================== Write functions ========================
+    /// Pay merchant (scan QR), supports split bill and cashback
+    public entry fun pay_merchant(
+        sender: &signer,
+        merchant_addr: address,
+        amount: u64,
+        coin_type: u8, // 0 = USDT, 1 = USDC
+        split_with: vector<address>
+    ) acquires Merchant {
+        assert!(exists<Merchant>(merchant_addr), 2);
+        let payer_addr = signer::address_of(sender);
+        let merchant = borrow_global<Merchant>(merchant_addr);
+        let split_count = vector::length(&split_with) + 1;
+        let split_amount = amount / split_count;
 
-    public entry fun post_message(
-        _sender: &signer,
-        new_string_content: String,
-    ) acquires Message, BoardObjectController {
-        if (!exist_message()) {
-            let board_obj_signer = get_board_obj_signer();
-            move_to(&board_obj_signer, Message {
-                string_content: new_string_content,
-            });
-        };
-        let message = borrow_global_mut<Message>(get_board_obj_address());
-        message.string_content = new_string_content;
+        // Transfer coins to merchant (demo: no actual coin transfer, just record)
+        // In production, use Coin<T> and transfer from sender to merchant
+
+        let cashback = (split_amount * (merchant.cashback_percent as u64)) / 100;
+
+        // Record payment for each participant
+        let now = 0; // Replace with blockchain timestamp if available
+        move_to(sender, Payment {
+            payer: payer_addr,
+            merchant: merchant_addr,
+            amount: split_amount,
+            coin_type,
+            split_with: split_with,
+            cashback,
+            timestamp: now,
+        });
+        let i = 0;
+        while (i < vector::length(&split_with)) {
+            let addr = *vector::borrow(&split_with, i);
+            // In production, transfer from each addr to merchant
+            i = i + 1;
+        }
     }
 
-    // ======================== Read Functions ========================
-
+    /// View merchant info
     #[view]
-    public fun exist_message(): bool {
-        exists<Message>(get_board_obj_address())
+    public fun get_merchant(addr: address): (String, u8) acquires Merchant {
+        let m = borrow_global<Merchant>(addr);
+        (m.qr_code, m.cashback_percent)
     }
 
+    /// View payment info
     #[view]
-    public fun get_message_content(): (String) acquires Message {
-        let message = borrow_global<Message>(get_board_obj_address());
-        message.string_content
-    }
-
-    // ======================== Helper functions ========================
-
-    fun get_board_obj_address(): address {
-        object::create_object_address(&@message_board_addr, BOARD_OBJECT_SEED)
-    }
-
-    fun get_board_obj_signer(): signer acquires BoardObjectController {
-        object::generate_signer_for_extending(&borrow_global<BoardObjectController>(get_board_obj_address()).extend_ref)
-    }
-
-    // ======================== Unit Tests ========================
-
-    #[test_only]
-    public fun init_module_for_test(sender: &signer) {
-        init_module(sender);
+    public fun get_payment(addr: address): (address, address, u64, u8, vector<address>, u64, u64) acquires Payment {
+        let p = borrow_global<Payment>(addr);
+        (p.payer, p.merchant, p.amount, p.coin_type, p.split_with, p.cashback, p.timestamp)
     }
 }

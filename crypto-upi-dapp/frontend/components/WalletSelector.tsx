@@ -76,6 +76,14 @@ export function WalletSelector() {
       <DialogTrigger asChild>
         <Button>Connect a Wallet</Button>
       </DialogTrigger>
+      <div className="p-4 text-sm text-gray-700 bg-yellow-50 rounded mb-2">
+        <strong>Troubleshooting:</strong>
+        <ul className="list-disc ml-4 mt-1">
+          <li>Make sure you have a supported Aptos wallet extension (Petra, Martian, etc.) installed and unlocked in your browser.</li>
+          <li>Refresh this page after installing or unlocking your wallet.</li>
+          <li>If you still see this message, try a different browser or disable other extensions that may interfere.</li>
+        </ul>
+      </div>
       <ConnectWalletDialog close={closeDialog} />
     </Dialog>
   );
