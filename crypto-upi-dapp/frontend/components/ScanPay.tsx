@@ -5,19 +5,30 @@ import { aptosClient } from "../utils/aptosClient";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { MODULE_ADDRESS } from "../constants";
 
-
 export const ScanPay: React.FC = () => {
-  const { account, signAndSubmitTransaction, wallet } = useWallet();
-  // Wallet connection status
-  const walletStatus = account ? `Wallet connected: ${account.address}` : "Wallet not connected";
-  const connectWallet = () => {
-    window.open("https://petra.app/", "_blank"); // Suggest Petra wallet for Aptos
-  };
+  // Petra wallet integration
   const [scannedQR, setScannedQR] = useState("");
-  const [amount, setAmount] = useState("0.001");
+  const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("");
   const [showScanner, setShowScanner] = useState(false);
-  const walletConnected = !!account && typeof signAndSubmitTransaction === "function";
+  const [petraAddress, setPetraAddress] = useState<string>("");
+  const walletConnected = !!petraAddress;
+
+  // Connect to Petra wallet
+  const connectWallet = async () => {
+    if (window.petra) {
+      try {
+        const response = await window.petra.connect();
+        setPetraAddress(response.address);
+        setStatus("Wallet connected: " + response.address);
+      } catch (err) {
+        setStatus("Wallet connection failed: " + String(err));
+      }
+    } else {
+      setStatus("Petra wallet extension not found. Please install Petra wallet.");
+      window.open("https://petra.app/", "_blank");
+    }
+  };
 
   const handleScan = (result: any) => {
     if (result?.text) {
@@ -31,49 +42,41 @@ export const ScanPay: React.FC = () => {
   };
 
   const handlePay = async () => {
-    if (!walletConnected || typeof signAndSubmitTransaction !== "function") {
-      setStatus("Wallet is not connected or transaction function is unavailable. Please reconnect your wallet or try a different wallet extension.");
+    if (!window.petra || !petraAddress) {
+      setStatus("Petra wallet not connected. Please connect your wallet first.");
       return;
     }
     setStatus("Processing payment...");
     try {
-      // Debug: print MODULE_ADDRESS
-      console.log("MODULE_ADDRESS:", MODULE_ADDRESS);
       if (!MODULE_ADDRESS) {
         setStatus("Error: MODULE_ADDRESS is undefined. Please check your .env and restart the frontend server.");
         return;
       }
-      // Validate merchant address
       const merchantAddr = scannedQR.trim();
       if (!merchantAddr || !merchantAddr.startsWith("0x") || merchantAddr.length < 10) {
         setStatus("Invalid merchant address scanned. Please try again.");
         return;
       }
-      // Only support minimum APT payment for hackathon
-      // Convert amount to octas (1 APT = 100,000,000 octas)
       const amountOctas = Math.floor(Number(amount) * 1e8);
       const tx = {
         type: "entry_function_payload",
         function: `${MODULE_ADDRESS}::crypto_upi::pay_merchant`,
         type_arguments: [],
         arguments: [
-          merchantAddr ?? "",
+          merchantAddr,
           amountOctas,
-          0, // coinType fixed to 0
+          0,
           []
         ],
+        max_gas_amount: 200000, // Changed to number
+        gas_unit_price: 1 // Changed to number
       };
       console.log("Transaction payload:", JSON.stringify(tx, null, 2));
-      if (!tx.type || !tx.function || !Array.isArray(tx.type_arguments) || !Array.isArray(tx.arguments)) {
-        setStatus("Transaction payload is invalid. Please check all fields and try again.");
-        return;
-      }
       let response;
       try {
-        response = await signAndSubmitTransaction(tx as any);
+        response = await window.petra.signAndSubmitTransaction(tx);
       } catch (err) {
-        console.error('Wallet transaction error:', err);
-        setStatus('Wallet transaction error: ' + (err && typeof err === 'object' && 'message' in err ? (err as any).message : String(err)));
+        setStatus('Wallet transaction error: ' + String(err));
         return;
       }
       if (response?.hash) {
@@ -91,19 +94,17 @@ export const ScanPay: React.FC = () => {
       <CardTitle className="text-xl mb-2 text-blue-700">Scan & Pay</CardTitle>
       <div className="flex flex-col gap-3">
         <div className="text-sm mb-2">
-          <span className={account ? "text-green-700" : "text-red-700"}>{walletStatus}</span>
-          {!account && (
+          <span className={walletConnected ? "text-green-700" : "text-red-700"}>{walletConnected ? `Wallet connected: ${petraAddress}` : "Wallet not connected"}</span>
+          {!walletConnected && (
             <button className="ml-2 bg-blue-500 text-white px-2 py-1 rounded" onClick={connectWallet}>
-              Install Petra Wallet
+              Connect Petra Wallet
             </button>
           )}
-          <div className="mt-2 p-2 bg-gray-100 rounded text-xs">
-            <div><strong>Wallet name:</strong> {wallet?.name ?? "N/A"}</div>
-            <div><strong>Wallet type:</strong> {wallet?.type ?? "N/A"}</div>
-            <div><strong>Account address:</strong> {account?.address?.toStringLong() ?? "N/A"}</div>
-            <div><strong>signAndSubmitTransaction type:</strong> {typeof signAndSubmitTransaction}</div>
-            <div><strong>signAndSubmitTransaction available:</strong> {signAndSubmitTransaction ? "Yes" : "No"}</div>
-          </div>
+          {walletConnected && (
+            <button className="ml-2 bg-red-500 text-white px-2 py-1 rounded" onClick={() => { setPetraAddress(""); setStatus("Wallet disconnected."); }}>
+              Disconnect Wallet
+            </button>
+          )}
         </div>
         {!scannedQR && !showScanner && (
           <button className="bg-blue-500 text-white px-4 py-2 rounded" onClick={() => setShowScanner(true)}>
@@ -128,10 +129,10 @@ export const ScanPay: React.FC = () => {
             <div className="text-sm text-gray-600">Merchant: {scannedQR}</div>
             <input
               type="number"
-              placeholder="Amount (default: 0.001 APT)"
+              placeholder="Enter amount in APT"
               value={amount}
-              min="0.001"
-              step="0.001"
+              min="0.000001"
+              step="0.000001"
               onChange={e => setAmount(e.target.value)}
               className="border rounded px-2 py-1"
             />
